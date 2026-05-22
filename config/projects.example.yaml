@@ -1,0 +1,26 @@
+projects:
+  - project_id: edub
+    collection: edub
+    path: projects/edub
+    manifest: docs/project-knowledge-manifest.md
+
+  - project_id: voice-stack
+    collection: voice-stack
+    path: projects/voice-stack
+    manifest: docs/project-knowledge-manifest.md
+
+  - project_id: autodub
+    collection: autodub
+    path: projects/autodub
+    manifest: docs/project-knowledge-manifest.md
+
+  - project_id: local-runtime-manager
+    collection: local-runtime-manager
+    path: projects/local-runtime-manager
+    manifest: docs/project-knowledge-manifest.md
+
+shared:
+  collection: shared-decisions
+  files:
+    - ../README.MD
+    - ../r2r-prep.md

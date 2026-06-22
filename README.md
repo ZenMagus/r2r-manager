@@ -89,3 +89,39 @@ It reports `would_create`, `would_update`, `unchanged`, `unknown_metadata`, `mis
 ```bash
 ./.venv/bin/python scripts/compare_r2r.py --config config/projects.example.yaml --project voice-stack --json
 ```
+
+## Current cautious sync
+
+`scripts/apply_r2r_sync.py` turns the comparison report into a sync operation plan. It is dry-run by default and does not call mutating R2R endpoints unless `--apply` is present.
+
+Confirmed write support for this slice:
+
+- Create: `POST /v3/documents` with a local Markdown file, collection ID, and deterministic metadata.
+- Metadata replacement: `PUT /v3/documents/{id}/metadata` exists, but it is not used as a content update substitute.
+
+Not used or implemented:
+
+- document delete
+- document archive
+- stale remote mutation
+- collection creation
+- delete/recreate replacement
+- auto-sync hooks
+
+`would_create` is eligible for apply only when the target collection already exists. `would_update` is skipped with `content_update_endpoint_unknown` because a safe document-content replacement endpoint has not been confirmed.
+
+Read requests use `R2R_TIMEOUT_SECONDS` (default `5`). Write requests use `R2R_WRITE_TIMEOUT_SECONDS` (default `300`). A timed-out or failed mutation is reported as `r2r_write: attempted` and `remote_state: unknown`; run the read-only comparison before any later apply so successfully ingested documents become `unchanged` and are not retried.
+
+R2R does not accept YAML as a native `DocumentType`. `.yaml` and `.yml` candidates are uploaded as `text/plain` with a safe filename ending in `.txt`; their original `source_path` and `content_sha256` remain in metadata. Collection IDs are sent as a JSON list, matching R2R's `Json[list[UUID]]` form contract.
+
+Dry-run:
+
+```bash
+./.venv/bin/python scripts/apply_r2r_sync.py --config config/projects.example.yaml --project voice-stack
+```
+
+Live create apply, only when explicitly requested:
+
+```bash
+./.venv/bin/python scripts/apply_r2r_sync.py --config config/projects.example.yaml --project voice-stack --apply
+```

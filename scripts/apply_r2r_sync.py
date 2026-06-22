@@ -11,19 +11,21 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.project_config import ProjectConfigError, load_project_config  # noqa: E402
-from app.r2r_client import R2RReadOnlyClient  # noqa: E402
+from app.r2r_client import R2RReadOnlyClient, R2RWriteClient  # noqa: E402
 from app.r2r_compare import compare_plan_to_live_r2r  # noqa: E402
 from app.r2r_config import R2RConfig, get_r2r_config  # noqa: E402
 from app.r2r_probe import probe_r2r  # noqa: E402
+from app.r2r_sync import build_sync_report  # noqa: E402
 from app.sync_plan import build_sync_plan  # noqa: E402
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare local doc sync plan to R2R read-only document metadata.")
+    parser = argparse.ArgumentParser(description="Plan or apply cautious R2R document create/update sync.")
     parser.add_argument("--config", default="config/projects.example.yaml")
     parser.add_argument("--project", action="append", help="Project ID to include. May be repeated.")
     parser.add_argument("--all", action="store_true", help="Include all registered projects plus shared docs.")
     parser.add_argument("--base-url", help="Override R2R base URL.")
+    parser.add_argument("--apply", action="store_true", help="Perform eligible R2R creates. Omit for dry-run.")
     parser.add_argument("--json", action="store_true", help="Print structured JSON.")
     args = parser.parse_args()
 
@@ -52,27 +54,46 @@ def main() -> int:
         api_key=env_config.api_key,
         write_timeout_seconds=env_config.write_timeout_seconds,
     )
-    client = R2RReadOnlyClient(r2r_config)
+    client = R2RWriteClient(r2r_config) if args.apply else R2RReadOnlyClient(r2r_config)
     probe = probe_r2r(client)
     if not probe.reachable:
         payload = {
-            "mode": "read_only_compare",
+            "mode": "apply" if args.apply else "dry_run",
             "r2r_write": "not_performed",
-            "comparison_status": "r2r_unreachable",
+            "remote_state": "not_changed",
+            "sync_status": "r2r_unreachable",
             "probe": probe.to_dict(),
-            "summary": {"total": 0, "by_action": {}, "by_project": {}, "by_collection": {}},
-            "items": [],
+            "summary": {"total": 0, "created": 0, "updated": 0, "skipped": 0, "stale_remote_report_only": 0, "errors": 0, "by_status": {}, "by_action": {}, "by_project": {}},
+            "operations": [],
             "warnings": ["r2r_unreachable"],
         }
         _print(payload, json_output=args.json)
         return 1
 
     plan = build_sync_plan(project_config, project_ids=project_ids)
-    report = compare_plan_to_live_r2r(plan, client)
+    comparison = compare_plan_to_live_r2r(plan, client)
+    if comparison.comparison_status != "complete":
+        payload = {
+            "mode": "apply" if args.apply else "dry_run",
+            "r2r_write": "not_performed",
+            "remote_state": "not_changed",
+            "sync_status": comparison.comparison_status,
+            "probe": probe.to_dict(),
+            "comparison": comparison.to_dict(),
+            "summary": {"total": 0, "created": 0, "updated": 0, "skipped": 0, "stale_remote_report_only": 0, "errors": 0, "by_status": {}, "by_action": {}, "by_project": {}},
+            "operations": [],
+            "warnings": list(comparison.warnings),
+        }
+        _print(payload, json_output=args.json)
+        return 1
+
+    report = build_sync_report(plan, comparison, client=client, apply=args.apply)
     payload = report.to_dict()
+    payload["sync_status"] = "complete"
     payload["probe"] = probe.to_dict()
+    payload["comparison"] = comparison.to_dict()
     _print(payload, json_output=args.json)
-    return 0
+    return 0 if report.summary()["errors"] == 0 else 1
 
 
 def _print(payload: dict, *, json_output: bool) -> None:
@@ -84,30 +105,35 @@ def _print(payload: dict, *, json_output: bool) -> None:
 
 def _render_text(payload: dict) -> str:
     lines = [
-        "R2R read-only comparison",
-        f"comparison_status: {payload['comparison_status']}",
+        "R2R cautious sync",
+        f"sync_status: {payload['sync_status']}",
+        f"mode: {payload['mode']}",
         f"r2r_write: {payload['r2r_write']}",
+        f"remote_state: {payload['remote_state']}",
         f"base_url: {payload.get('probe', {}).get('base_url')}",
-        f"items: {payload['summary']['total']}",
-        "actions:",
+        f"operations: {payload['summary']['total']}",
+        f"created: {payload['summary']['created']}",
+        f"updated: {payload['summary']['updated']}",
+        f"skipped: {payload['summary']['skipped']}",
+        f"stale_remote_report_only: {payload['summary']['stale_remote_report_only']}",
+        f"errors: {payload['summary']['errors']}",
+        "statuses:",
     ]
-    for action, count in payload["summary"]["by_action"].items():
-        lines.append(f"- {action}: {count}")
-    lines.append("projects:")
-    for project_id, actions in payload["summary"]["by_project"].items():
-        detail = ", ".join(f"{action}={count}" for action, count in actions.items())
-        lines.append(f"- {project_id}: {detail}")
-    lines.append("items:")
-    for item in payload["items"]:
-        local = (item.get("local_sha256") or "-")[:12]
-        remote = (item.get("remote_sha256") or "-")[:12]
+    for status, count in payload["summary"]["by_status"].items():
+        lines.append(f"- {status}: {count}")
+    lines.append("operations:")
+    for operation in payload["operations"]:
+        reason = f" reason={operation.get('reason')}" if operation.get("reason") else ""
         lines.append(
-            f"- {item.get('project_id')} -> {item.get('collection')} {item['action']} {item.get('source_path')} local={local} remote={remote}"
+            f"- {operation.get('project_id')} -> {operation.get('collection')} {operation['action']} {operation['status']} {operation.get('source_path')}{reason}"
         )
     if payload.get("warnings"):
         lines.append("warnings:")
         lines.extend(f"- {warning}" for warning in payload["warnings"])
-    lines.append("No R2R API writes, ingestion, updates, deletes, archives, or collection creation were performed.")
+    if payload["mode"] == "dry_run":
+        lines.append("Dry-run only: no R2R mutating endpoints were called.")
+    else:
+        lines.append("Apply mode: only eligible creates were attempted; delete/archive/stale mutations are not implemented.")
     return "\n".join(lines)
 
 

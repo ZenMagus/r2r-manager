@@ -26,6 +26,7 @@ def main() -> int:
         base_url=(args.base_url or env_config.base_url).rstrip("/"),
         timeout_seconds=env_config.timeout_seconds,
         api_key=env_config.api_key,
+        write_timeout_seconds=env_config.write_timeout_seconds,
     )
     report = probe_r2r(R2RReadOnlyClient(config))
     payload = report.to_dict()

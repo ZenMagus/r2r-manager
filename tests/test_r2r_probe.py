@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from app.r2r_client import R2RReadOnlyClient
-from app.r2r_config import DEFAULT_R2R_BASE_URL, get_r2r_config
+from app.r2r_config import DEFAULT_R2R_BASE_URL, DEFAULT_R2R_WRITE_TIMEOUT_SECONDS, get_r2r_config
 from app.r2r_probe import probe_r2r
 
 
@@ -33,15 +33,19 @@ def test_r2r_config_defaults_and_env_override(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("R2R_BASE_URL", raising=False)
     monkeypatch.delenv("R2R_API_KEY", raising=False)
     monkeypatch.delenv("R2R_TOKEN", raising=False)
+    monkeypatch.delenv("R2R_WRITE_TIMEOUT_SECONDS", raising=False)
 
     assert get_r2r_config().base_url == DEFAULT_R2R_BASE_URL
+    assert get_r2r_config().write_timeout_seconds == DEFAULT_R2R_WRITE_TIMEOUT_SECONDS
 
     monkeypatch.setenv("R2R_BASE_URL", "http://r2r.test:7272/")
     monkeypatch.setenv("R2R_API_KEY", "secret")
+    monkeypatch.setenv("R2R_WRITE_TIMEOUT_SECONDS", "450")
 
     config = get_r2r_config()
     assert config.base_url == "http://r2r.test:7272"
     assert config.api_key == "secret"
+    assert config.write_timeout_seconds == 450.0
 
 
 def test_r2r_client_handles_reachable_health_response() -> None:

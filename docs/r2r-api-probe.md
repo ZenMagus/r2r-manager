@@ -22,6 +22,7 @@ Optional environment variables:
 
 - `R2R_BASE_URL`
 - `R2R_TIMEOUT_SECONDS`
+- `R2R_WRITE_TIMEOUT_SECONDS`
 - `R2R_API_KEY`
 - `R2R_TOKEN`
 
@@ -41,6 +42,19 @@ It does not call POST, PUT, PATCH, or DELETE endpoints.
 
 The read-only comparison command also calls only document list GET endpoints.
 
+## Confirmed Write Endpoint Evidence
+
+Local source inspection shows:
+
+- `POST /v3/documents` creates a document from a file, raw text, or chunks with metadata and optional collection IDs.
+- `PUT /v3/documents/{id}/metadata` replaces metadata only.
+- `PATCH /v3/documents/{id}/metadata` appends metadata only.
+- `DELETE /v3/documents/{id}` exists but is out of scope and must not be called by r2r-manager's cautious sync path.
+
+`apply_r2r_sync.py` uses this evidence conservatively. It may call `POST /v3/documents` only when `--apply` is present and the target collection already exists. It does not call metadata replacement as a substitute for content update. It does not delete, archive, create collections, or mutate stale remote docs.
+
+The document create form receives `collection_ids` as a JSON-encoded list. YAML is not listed in R2R's `DocumentType`, so r2r-manager presents `.yaml` and `.yml` files as `text/plain` with `.txt` upload filenames while preserving their original source metadata.
+
 ## Evidence Report
 
 The probe reports:
@@ -53,7 +67,7 @@ The probe reports:
 - whether archive/inactive/version terms appear in OpenAPI
 - whether update/delete endpoints are evidenced in OpenAPI
 
-Update/delete/archive evidence is informational only. No mutating endpoint is called.
+Update/delete/archive evidence is informational only for probe and compare commands. No mutating endpoint is called by either command.
 
 ## Commands
 
@@ -67,4 +81,4 @@ JSON output:
 
 ## Future Work
 
-Future apply logic must be a separate explicit write task. Delete/stale/archive behavior must not be assumed until R2R support and operator policy are verified.
+Future work should confirm a safe document-content replacement endpoint before enabling `would_update`. Delete/stale/archive behavior must not be assumed until R2R support and operator policy are verified.

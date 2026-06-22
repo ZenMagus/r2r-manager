@@ -16,7 +16,8 @@ Git is the canonical versioned source. R2R is a searchable projection.
 6. Read Git metadata.
 7. Build a dry-run plan with `would_update_unknown`, `missing`, and `skipped` actions.
 8. Compare against R2R read-only document metadata when requested.
-9. In a later apply slice, write only when explicitly requested.
+9. Plan cautious create/update sync in dry-run mode by default.
+10. With explicit `--apply`, create only eligible missing docs when the target collection already exists.
 
 ## Current implementation
 
@@ -34,16 +35,29 @@ Implemented now:
 - `scripts/check_r2r_state.py` prints the read-only probe report.
 - `app/r2r_compare.py` compares local candidates against remote document metadata without mutation.
 - `scripts/compare_r2r.py` prints readable or JSON read-only comparison output.
+- `app/r2r_sync.py` builds cautious dry-run/apply operation reports from the comparison.
+- `scripts/apply_r2r_sync.py` plans sync by default and requires `--apply` for any mutation.
 
 Not implemented yet:
 
-- R2R mutating API calls.
-- apply mode.
+- R2R document content update.
+- collection creation.
 - stale/delete handling.
 - auto-sync hooks.
 - NATS message handling.
 
 The read-only probe and comparison may call `/v3/health`, OpenAPI endpoints, and collection/document list endpoints. They do not call create, update, delete, ingest, or archive endpoints.
+
+The apply command may call confirmed `POST /v3/documents` only when `--apply` is present. It does not call delete/archive endpoints, does not create collections, and skips `would_update` as `content_update_endpoint_unknown` until a safe content replacement endpoint is confirmed.
+
+Write outcomes distinguish request intent from confirmed state:
+
+- `r2r_write: not_performed`: no mutating request was sent.
+- `r2r_write: attempted`: at least one mutating request was sent but no success was confirmed.
+- `r2r_write: performed`: at least one write success was confirmed.
+- `remote_state: unknown`: a sent mutation timed out or failed, so read-only comparison is required before another apply.
+
+There is no automatic write retry. YAML sources are presented to R2R as plain text with `.txt` upload names, and collection IDs are encoded as a list in the multipart form.
 
 ## Versioning strategy
 
